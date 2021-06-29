@@ -161,6 +161,11 @@ class GpPatient extends Model
         return $this->hasOne(CpPat::class, 'pat_id', 'patient_id_cp');
     }
 
+    public function groupedRxs()
+    {
+        return $this->hasMany(GpRxsGrouped::class, 'patient_id_cp', 'patient_id_cp');
+    }
+
     /*
      * Mutators
      */

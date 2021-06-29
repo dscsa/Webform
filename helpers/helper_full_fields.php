@@ -1,6 +1,8 @@
 
 <?php
 
+use GoodPill\Models\GpOrderItem;
+use GoodPill\Models\GpRxsGrouped;
 use GoodPill\Logging\{
     GPLog,
     AuditLog,
@@ -121,6 +123,25 @@ function add_full_fields($patient_or_order, $mysql, $overwrite_rx_messages)
         if ($set_days_and_msgs or $overwrite) {
 
             list($days, $message) = get_days_and_message($patient_or_order[$i], $patient_or_order);
+
+            /*
+             *  Refactored Model Code
+             * Used for comparisons currently
+             * Need to observe logs and compare to actual production values
+             *
+             */
+            if ($patient_or_order[0]['is_order'] && $patient_or_order[$i]['item_date_added']) {
+                $item = GpOrderItem::where('invoice_number', $patient_or_order[$i]['invoice_number'])
+                    ->where('rx_number', $patient_or_order[$i]['rx_number'])
+                    ->first();
+                DaysMessageHelper::getDaysAndMessage($item);
+            } else {
+                //  This specifically is matching on `rx_numbers`
+                //  This is because the assumption is that $patient_or_order already has it's grouped data on the item
+                //  and we are just refetching the same thing as a GpRxsGrouped item
+                $item = GpRxsGrouped::where('rx_numbers', $patient_or_order[$i]['rx_numbers'])->first();
+                DaysMessageHelper::getDaysAndMessage($item);
+            }
 
             //If days_actual are set, then $days will be 0 (because it will be a recent fill)
             $days_added      = (@$patient_or_order[$i]['item_date_added'] AND $days > 0 AND ! @$patient_or_order[$i]['days_dispensed_default']);

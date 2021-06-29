@@ -296,7 +296,6 @@ class GpOrder extends Model
                && in_array($this->order_source, ['Webform Refill', 'Refill w/ Note']);
     }
 
-
     /*
      * Other Methods
      */

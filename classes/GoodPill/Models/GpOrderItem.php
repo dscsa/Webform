@@ -4,9 +4,9 @@ namespace GoodPill\Models;
 
 use Carbon\Carbon;
 use GoodPill\Logging\GPLog;
+use GoodPill\Models\GpOrder;
 use Illuminate\Database\Eloquent\Model;
 
-use GoodPill\Models\GpOrder;
 use GoodPill\Models\GpPatient;
 use GoodPill\Models\GpRxsSingle;
 use GoodPill\Models\v2\PickListDrug;
@@ -21,7 +21,7 @@ require_once "exports/export_v2_order_items.php";
 /**
  * Class GpOrderItem
  */
-class GpOrderItem extends Model
+class GpOrderItem extends Model implements \DaysMessageInterface
 {
 
     use \GoodPill\Traits\HasCompositePrimaryKey;
@@ -184,9 +184,33 @@ class GpOrderItem extends Model
         return $this->hasOne(GpRxsSingle::class, 'rx_number', 'rx_number');
     }
 
+    /**
+     * Loads the GpRxsGrouped data into an rxs single item
+     * Because there is no traditional relationship that laravel can make, we have to pseudo-load the data
+     * When inspecting an order item, if you fetch the rxs for that item you would need to call this function
+     * to apply the grouped model into the rxs object
+     *
+     * Duplicate logic of GpRxsSingle - grouped()
+     *
+     */
+    public function grouped()
+    {
+        $this->grouped = GpRxsGrouped::where('rx_numbers', 'like', "%,{$this->rx_number},%")->first();
+    }
+
     /*
         ## CONDITIONALS
      */
+
+    /**
+     * Checks that item has refills available
+     * @return bool
+     */
+    public function hasRefills() : bool
+    {
+        $grouped = $this->grouped;
+        return $grouped->hasRefills();
+    }
 
     /**
      * Query v2 to see if there is already a drug pended for this order
@@ -210,11 +234,15 @@ class GpOrderItem extends Model
      * Determine if the item was manually added
      * @return bool
      */
-    function isAddedManually($item)
+    function isAddedManually() : bool
     {
         return
-            in_array($this->item_added_by, ADDED_MANUALLY) or
-            ($this->item_date_added and $this->refill_date_manual and $this->order->is_auto_refill());
+            in_array($this->item_added_by, ADDED_MANUALLY) ||
+            (
+                $this->item_date_added &&
+                $this->refill_date_manual &&
+                $this->order->is_auto_refill()
+            );
     }
 
     /**
@@ -224,10 +252,13 @@ class GpOrderItem extends Model
      */
     public function isAutoRefill(): bool
     {
-        return in_array($this->order_source, ['Auto Refill v2', 'O Refills']);
+        return in_array($this->order->order_source, ['Auto Refill v2', 'O Refills']);
     }
 
     /**
+     * GpOrderItem
+     * @TODO - Decide what to do with this and corresponding grouped function
+     *
      * Determine by the stock level if the item is offered or not
      * @return bool
      */
@@ -237,19 +268,11 @@ class GpOrderItem extends Model
         $stock = $rxs->stock;
 
         $rx_gsn = $rxs->rx_gsn;
-        $drug_name = $rxs->drug_name;
-        //  This should always be set, `stock_level` isn't null in the database for any items currently
+        $drug_name = $rxs->drug_name; // this used to be used for logging purposes
+
+        //  For a GpOrderItem, a stock_level_initial exists, so this check is used
         $stock_level = $this->stock_level_initial ?: $stock->stock_level;
 
-        GPLog::debug(
-            "Stock Level for order #{$this->invoice_number}, rx #{$this->rx_number}: {$stock}",
-            [
-                'item' => $this->toJSON(),
-                'stock_level' => $stock_level,
-                'drug_name' => $drug_name,
-                'rx_gsn' => $rx_gsn,
-            ]
-        );
         if (
             $rx_gsn > 0 ||
             $stock_level == STOCK_LEVEL['NOT OFFERED'] ||
@@ -260,6 +283,151 @@ class GpOrderItem extends Model
 
         return false;
     }
+
+    /**
+     * Checks to see if the stock price is high
+     * @return bool
+     */
+    public function isHighPrice() : bool
+    {
+        $price_per_month = $this->rxs->stock->price_per_month;
+
+        return $price_per_month >= 20;
+    }
+
+    /**
+     * Determines if we should not transfer out items
+     * This function is worded poorly. Should really be called 'shouldTransfer'
+     * Checks for a high price or to see if the patient's backup pharmacy is us
+     *
+     * @return bool
+     */
+    public function isNoTransfer() : bool
+    {
+        return $this->isHighPrice() || $this->patient->pharmacy_phone === '8889875187';
+    }
+
+    /**
+     * Check if the item came from a webform transfer of some kind
+     *
+     * @return bool
+     */
+    public function isWebform() : bool
+    {
+        return
+            $this->isWebformTransfer() ||
+            $this->isWebformErx() ||
+            $this->isWebformRefill();
+    }
+
+    /**
+     * Checks of this is a webform transfer
+     * @return bool
+     */
+    public function isWebformTransfer()
+    {
+        return in_array($this->order_source, ['Webform Transfer', 'Transfer /w Note']);
+    }
+
+    /**
+     * Checks of this is a webform exr (surescripts)
+     * @return bool
+     */
+    public function isWebformErx()
+    {
+        return in_array($this->order_source, ['Webform eRx', 'eRx /w Note']);
+    }
+
+    /**
+     * Checks of this is a webform refill
+     * @return bool
+     */
+    public function isWebformRefill()
+    {
+        return in_array($this->order_source, ['Webform Refill', 'Refill w/ Note']);
+    }
+
+    /**
+     * Determine if this is a refill that we should try to fill
+     * @return bool
+     */
+    public function isRefillOnly() : bool
+    {
+        $rxs = $this->rxs;
+        $stock = $rxs->stock;
+
+        $stock_level = $this->stock_level_initial ?: $stock->stock_level;
+        return in_array(
+            $stock_level,
+            [
+                STOCK_LEVEL['OUT OF STOCK'],
+                STOCK_LEVEL['REFILL ONLY']
+            ]
+        );
+    }
+
+    /**
+     * Check stock level to see if this a one-time fill
+     * @TODO - Decide what to do with this and corresponding grouped function
+     * @return bool
+     */
+    public function isOneTime() : bool
+    {
+        $rxs = $this->rxs;
+        $stock = $rxs->stock;
+
+        $stock_level = $this->stock_level_initial ?: $stock->stock_level;
+        return in_array(
+            $stock_level,
+            [
+                STOCK_LEVEL['ONE TIME']
+            ]
+        );
+    }
+
+    /**
+     * Checks if this item happens to already be in an order under same name
+     * matches drug_generic rather than rx_number
+     *
+     * @param GpOrder $order
+     * @return bool
+     */
+    function isRefill(GpOrder $order) : bool
+    {
+        foreach ($order->items as $orderItem) {
+            if (
+                $this->drug_generic == $orderItem->drug_generic
+                && $orderItem->refill_date_first
+            ) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Was the rx properly parsed
+     * @return bool
+     */
+    public function isNotRxParsed() : bool
+    {
+        $grouped = $this->grouped;
+        return $grouped->isNotRxParsed();
+    }
+
+    /**
+     * Checks if the current item is already in the order
+     * This may not be needed for order item
+     * @param GpOrder $order
+     * @return bool
+     */
+    public function isDuplicateGsn(GpOrder $order) : bool
+    {
+        //  @TODO - Write this
+        return true;
+    }
+
     /*
         ## ACCESSORS
      */
@@ -303,7 +471,7 @@ class GpOrderItem extends Model
 
         $price = ceil($this->days_dispensed * $price_per_month / 30);
         /*
-         * removing until time to go live
+         * Should this log continue to be here/do we care about this?
         if ($price > 80) {
 
             GPLog::debug(
@@ -336,6 +504,51 @@ class GpOrderItem extends Model
         }
     }
 
+    /**
+     * Gets the date that the prescription was originally written
+     * @return false|int
+     */
+    public function getRxDateWrittenAttribute()
+    {
+        return  strtotime($this->rxs->rx_date_expired . ' -1 year');
+    }
+
+    /**
+     * The date that the item was added to the order or prescription written
+     * @return mixed
+     */
+    public function getDateAddedAttribute()
+    {
+        return $this->order->order_date_added ?: $this->rx_date_written;
+    }
+
+    /**
+     * Calculated earliest number of days when the item can be filled
+     * @return false|int
+     */
+    public function getDaysEarlyNextAttribute()
+    {
+        return strtotime($this->refill_date_next) - strtotime($this->date_added);
+    }
+
+    /**
+     * Calculated default days when an item can be due for another fill
+     * @return false|int
+     */
+    public function getDaysEarlyDefaultAttribute()
+    {
+        return strtotime($this->refill_date_default) - strtotime($this->date_added);
+    }
+
+    /**
+     * Calculated days since an item was last filled
+     * @return false|int
+     */
+    public function getDaysSinceAttribute()
+    {
+        return strtotime($this->date_added) - strtotime($this->rxs->refill_date_last);
+    }
+
 
     /**
      * Get a user friendly drug name. This is used mostly for communications to the patient
@@ -354,6 +567,93 @@ class GpOrderItem extends Model
         }
 
         return "{$rxs->drug_generic} ({$rxs->drug_brand})";
+    }
+
+    /**
+     * Gets the days left before an rx expires
+     * Calls instance of order items grouped method
+     * @return float|int|null
+     */
+    public function getDaysLeftBeforeExpiration()
+    {
+        $grouped = $this->grouped;
+        return $grouped->getDaysLeftBeforeExpiration();
+    }
+
+    /**
+     * Determines the number of days left for the current refill
+     * @return mixed
+     */
+    public function getDaysLeftInRefills()
+    {
+        $grouped = $this->grouped;
+        return $grouped->getDaysLeftInRefills();
+    }
+
+    /**
+     * Determines the number of days left in stock
+     * Returns either 60.6 or `DAYS_MIN` of 45
+     * @return float|int|void
+     */
+    public function getDaysLeftInStock()
+    {
+        $grouped = $this->grouped;
+        return $grouped->getDaysLeftInRefills();
+    }
+
+    /**
+     * Determines the number of default days to return for days_and_messages
+     *
+     * This is the MIN of ($days_left_in_refills, $days_left_in_stock). If either
+     * value is 0, Use the DAY_STD in its place
+     *
+     * This is really more $days_to_fill.  It's not the default, but it's what
+     * we've determined as the max amount we can fill
+     * @return mixed
+     */
+    public function getDaysDefault()
+    {
+        $days_left_in_refills = $this->getDaysLeftInRefills();
+        $days_left_in_stock = $this->getDaysLeftInStock();
+
+        $days = min(
+            $days_left_in_refills ?: DAYS_STD,
+            $days_left_in_stock ?: DAYS_STD
+        );
+        //  This is used for generating logs. Skipping logging from class methods
+        //$remainder = $days % DAYS_UNIT;
+
+        return $days;
+    }
+
+    /**
+     * Calculate the new refills_dispensed_default field for the gp_order_item
+     *
+     * This seems to only be used to save back to gp_order_items table in `helper_days_and_message`
+     * This may work best as a mutator
+     * @return float|int|mixed
+     */
+    public function calculateRefillsDispensedDefault()
+    {
+        //  Not sure if decimal 0.00 evaluates to falsy in PHP
+        if ($this->qty_total <= 0)
+        {
+            return 0;
+        }
+
+        if ($this->refill_date_first)
+        {
+            $countOfRefills = $this->refills_total - ($this->days_dispensed_default === 0 ? 0 : 1);
+            return max(0, $countOfRefills);
+        }
+
+        //  6028507 if Cindy hasn't adjusted the days/qty yet we need to calculate it ourselves
+        if ($this->qty_dispensed_default)
+        {
+            return $this->refills_total * (1 - $this->qty_dispensed_default/$this->qty_total);
+        }
+
+        return $this->refills_total - ($this->item_date_added ? 1 : 0);
     }
 
     /*

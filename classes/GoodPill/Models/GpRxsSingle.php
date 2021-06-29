@@ -154,6 +154,25 @@ class GpRxsSingle extends Model
     }
 
     /**
+     * Relationship to an order
+     * There is no direct reference to an order from an rxs, so hasOneThrough is used
+     * @return \Illuminate\Database\Eloquent\Relations\HasOneThrough
+     */
+    public function order()
+    {
+        return $this->hasOneThrough(GpOrder::class, GpOrderItem::class);
+    }
+
+    /**
+     * Relationship to an order item
+     * @return \Illuminate\Database\Eloquent\Relations\BelongsTo
+     */
+    public function orderitem()
+    {
+        return $this->belongsTo(GpOrderItem::class, 'rx_number', 'rx_number');
+    }
+
+    /**
      * Loads the GpRxsGrouped data into an rxs single item
      * Because there is no traditional relationship that laravel can make, we have to pseudo-load the data
      * When inspecting an order item, if you fetch the rxs for that item you would need to call this function

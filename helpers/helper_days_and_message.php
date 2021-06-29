@@ -547,6 +547,10 @@ function set_days_and_message($item, $days, $message, $mysql) {
     return $item;
 }
 
+/**
+ * Refactored into GpOrderItem as `calculateRefillsDispensedDefault`
+ * This is an oddly used function, need to reconsider its use
+ */
 function refills_dispensed_default($item)
 {
     if ($item['qty_total'] <= 0) { //Not sure if decimal 0.00 evaluates to falsey in PHP
