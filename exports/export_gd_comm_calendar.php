@@ -93,19 +93,26 @@ function order_shipped_notice($groups)
 
 function refill_reminder_notice($groups)
 {
+    $gpOrder = GpOrder::where('invoice_number', $groups['ALL'][0]['invoice_number'])->first();
+
+    if ($gpOrder) {
+        $days = $gpOrder->getDaysBeforeOutOfRefills();
+
+        GPLog::notice("Comparing MIN_DAYS to getDaysBeforeOutOfRefills", [
+            'groups' => $groups,
+            'MIN_DAYS' => $groups['MIN_DAYS'],
+            'days' => $days,
+        ]);
+        //  @TODO - Make live
+        // $event = new RefillReminder($gpOrder, $groups['MIN_DAYS']*24, '11:00');
+        // $event->publishEvent();
+    }
+
     if ($groups['MIN_DAYS'] == 366 or (! count($groups['NO_REFILLS']) and ! count($groups['NO_AUTOFILL']))) {
         GPLog::notice("Not making a refill_reminder_notice", $groups);
         return;
     }
-    /*
-     * Commentend out until ready to make live
-    $gpOrder = GpOrder::where('invoice_number', $groups['ALL'][0]['invoice_number'])->first();
 
-    if ($gpOrder) {
-        // $shipping_event = new RefillReminder($gpOrder, $groups['MIN_DAYS']*24, '11:00');
-        // $shipping_event->publishEvent();
-    }
-    */
     $subject  = 'Good Pill cannot refill these Rxs without your help.';
     $message  = '';
 

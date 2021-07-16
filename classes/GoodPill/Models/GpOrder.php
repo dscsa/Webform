@@ -3,6 +3,7 @@
 namespace GoodPill\Models;
 
 use Carbon\Carbon;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use GoodPill\Models\GpPatient;
 use GoodPill\Models\GpOrderItem;
@@ -16,6 +17,7 @@ use GoodPill\AWS\SQS\GoogleAppRequest\Invoice\Publish;
 use GoodPill\AWS\SQS\GoogleAppRequest\Invoice\Delete;
 use GoodPill\AWS\SQS\GoogleAppQueue;
 use GoodPill\Logging\GPLog;
+use Illuminate\Support\Collection;
 
 require_once "helpers/helper_calendar.php";
 require_once "helpers/helper_full_order.php";
@@ -577,9 +579,38 @@ class GpOrder extends Model
     public function getFilledItems(bool $filled = true)
     {
         if ($filled) {
-            return $this->items()->whereNotNull('rx_dispensed_id');
+            return $this->items()->whereNotNull('rx_dispensed_id')->get();
         } else {
-            return $this->items()->whereNull('rx_dispensed_id');
+            return $this->items()->whereNull('rx_dispensed_id')->get();
+        }
+    }
+
+    /**
+     * Gets the items that are fillable or not fillable
+     * Use this for `$groups['FILLED']`
+     *
+     * @param bool $fillable Optional - true for fillable, false for not fillable
+     * @return \Illuminate\Database\Eloquent\Collection
+     */
+    public function getFillableItems(bool $fillable = true)
+    {
+        if($fillable) {
+            return $this->items()
+                ->where(function (Builder $query) {
+                    return $query
+                        ->whereNotNull('rx_dispensed_id')
+                        ->orWhereNotNull('days_dispensed_default');
+                })
+                ->get();
+
+        } else {
+            return $this->items()
+                ->where( function(Builder $query) {
+                    return $query
+                        ->where('days_dispensed_default', 0)
+                        ->whereNull('rx_dispensed_id');
+                })
+                ->get();
         }
     }
 
@@ -597,7 +628,10 @@ class GpOrder extends Model
         $collection = $this->items->filter(function($item) {
             if (
                 //  This first condition may only need to be a check for 0?
-                ($item->refills_dispensed = 0 || is_null($item->refills_dispensed)) &&
+                (
+                    $item->refills_dispensed === 0 ||
+                    is_null($item->refills_dispensed)
+                ) &&
                 is_null($item->rxs->rx_transfer)
             ) {
                 return $item;
@@ -608,15 +642,20 @@ class GpOrder extends Model
     }
 
     /**
-     * Returns items that wont be autofilled
+     * Returns items that wont be autofilled and have none left
      * Equivalent method - $groups['NO_AUTOFILL']
      *
      * @return mixed
      */
-    public function getItemsWithNoAutofills()
+    public function getItemsWithNoAutofills() : Collection
     {
         $collection = $this->items->filter(function ($item) {
-            if ($item->rxs->rx_autofill === 0 && $item->days_dispensed) {
+            //  Use days_dispensed_actual, not the coalesced `days_dispensed`
+            if (
+                //  Could $item->rx_autofill_initial be used here instead?
+                //  What is the difference between this and AUTOFILL_ON?
+                $item->rxs->rx_autofill === 0 &&
+                $item->days_dispensed_actual) {
                 return $item;
             }
         });
@@ -625,21 +664,59 @@ class GpOrder extends Model
     }
 
     /**
-     * Returns whether the item is being filled
-     * Equivalent method = $groups['FILLED']
+     * Returns items that either have autofill on or off
+     * Equivalent methods - $groups['AUTOFILL_ON'] / $groups['AUTOFILL_OFF']
+     *
+     * @param bool $autofill - Optional. True returns autofill_on, false returns autofill_off
      * @return mixed
      */
-    public function filledItems() {
-        $collection = $this->items->filter(function ($item) {
-            if ($item->rxs->days_dispensed) {
-                return $item;
-            }
-        });
-
-        return $collection;
+    public function getItemsWithAutofill($autofill = true) : Collection
+    {
+        //  May be better to put autofill conditional in the filter
+        if ($autofill) {
+            $collection = $this->items->filter(function ($item) {
+                if ($item->rx_autofill_initial === 1) {
+                    return $item;
+                }
+            });
+            return $collection;
+        } else {
+            $collection = $this->items->filter(function ($item) {
+                if ($item->rx_autofill_initial === 0) {
+                    return $item;
+                }
+            });
+            return $collection;
+        }
     }
 
-    /**ß
+    /**
+     * Find the earliest item's days before it runs out of refills
+     * Returns the minimum days dispensed of the items in an order
+     *
+     * Analogous to `$groups['MIN_DAYS']`
+     * @return int
+     */
+    public function getDaysBeforeOutOfRefills() : int
+    {
+        $daysUntilOutOfRefills = $this->items->reduce(function ($carry, $item) {
+            $days = $item->days_dispensed;
+
+            $refills_dispensed = $item->refills_dispensed;
+            if (
+                !$refills_dispensed &&
+                $days &&
+                $days < $carry
+            ) {
+                return $days;
+            } else {
+                return $carry;
+            }
+        }, 366);
+        return $daysUntilOutOfRefills;
+    }
+
+    /**
      * Get to old order array
      * @return null|array
      */

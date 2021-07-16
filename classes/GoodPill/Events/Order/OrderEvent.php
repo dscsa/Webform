@@ -130,24 +130,33 @@ abstract class OrderEvent extends Event
             }
 
             /*************** Refill Reminder Data ******************/
-            $refill = $this->order->getItemsWithNoRefills();
-            $autofill = $this->order->getItemsWithNoAutofills();
+            $no_refills = $this->order->getItemsWithNoRefills();
+            $no_autofill = $this->order->getItemsWithNoAutofills();
 
-            if ($autofill->count() > 0) {
+            if ($no_autofill->count() > 0) {
                 $rxs = [];
 
-                $autofill->each(function($item) use (&$rxs) {
-                    $rxs[] = ["name" => $item->getDrugName().' - '.$item->rxs->rx_message_text];
+                $no_autofill->each(function($item) use (&$rxs) {
+                    $rxs[] = [
+                        'name' => $item->getDrugName(),
+                        'patient_message_text' => $item->getPatientMessageText(),
+                        'rx_number' => $item->rx_number,
+
+                    ];
                 });
 
                $data['no_autofill'] = ['rxs' => $rxs];
             }
 
-            if ($refill->count() > 0) {
+            if ($no_refills->count() > 0) {
                 $rxs = [];
 
-                $refill->each(function($item) use (&$rxs) {
-                    $rxs[] = ["name" => $item->getDrugName().' - '.$item->rxs->rx_message_text];
+                $no_refills->each(function($item) use (&$rxs) {
+                    $rxs[] = [
+                        'name' => $item->getDrugName(),
+                        'patient_message_text' => $item->getPatientMessageText(),
+                        'rx_number' => $item->rx_number,
+                    ];
                 });
 
                 $data['no_refill'] = ['rxs' => $rxs];

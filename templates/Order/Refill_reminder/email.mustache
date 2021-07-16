@@ -63,7 +63,7 @@
         <u>We need a new Rx for the following:</u>
     <ul>
         {{# rxs }}
-            <li>{{ name }}</li>
+            <li>{{ name }} - {{ patient_message_text }}</li>
         {{/ rxs }}
     </ul>
     </p>
@@ -74,7 +74,7 @@
         <u>These Rxs will NOT be filled automatically and must be requested 2 weeks in advance:</u>
     <ul>
         {{# rxs }}
-            <li>{{ name }}</li>
+            <li>{{ name }} - {{ patient_message_text }}</li>
         {{/ rxs }}
     </ul>
     </p>

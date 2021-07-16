@@ -407,6 +407,22 @@ class GpOrderItem extends Model
     }
 
     /**
+     * Parses and formats message text on an order item
+     * @return string
+     */
+    public function getPatientMessageText() : string
+    {
+        if (!empty($this->item_message_text)) {
+            $message = $this->item_message_text;
+        } else {
+            $rxs = $this->rxs;
+            $message = $rxs->rx_message_text;
+        }
+
+        return str_replace(' **', '', $message);
+    }
+
+    /**
      * A convenient way for setting the pickelist on an item.  This is here to overcome the
      * shortcomings of v2.  V2 fails to load on certain URLS, so this allows us to pass in the
      * calculated picklist

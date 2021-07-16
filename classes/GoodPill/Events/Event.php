@@ -67,7 +67,8 @@ abstract class Event
         }
 
         // TODO Replace this with a new object based Event
-        create_event($title, $comm_array, $this->hours_to_wait, $this->hour_of_day);
+        print_r($comm_array);
+        //create_event($title, $comm_array, $this->hours_to_wait, $this->hour_of_day);
     }
 
     /**
