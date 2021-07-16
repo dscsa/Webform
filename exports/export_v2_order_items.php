@@ -10,6 +10,7 @@ use \GoodPill\Models\GpOrder;
 use \GoodPill\Models\GpOrderItem;
 use \GoodPill\Models\GpPendGroup;
 use \GoodPill\Models\v2\PickListDrug;
+use \GoodPill\Events\OrderItem\PendingFailed;
 
 require_once 'exports/export_cp_orders.php';
 
@@ -621,15 +622,6 @@ function pend_pick_list($item, $list)
         $item
     );
 
-    $subject = "pend_pick_list: FAILURE!! {$invoice_number} {$drug_name} {$rx_number}";
-    $body = "Pending failed for {$drug_name} on order {$invoice_number}, Need to manually follow up and pend this";
-
-    $salesforce = [
-        "subject"   => $subject,
-        "body"      => $body,
-        "assign_to" => '.Testing',
-    ];
-
     GPLog::warning($subject, [
         'res' => $res,
         'pend_url' => $pend_url,
@@ -637,15 +629,14 @@ function pend_pick_list($item, $list)
         'item' => $item,
         'list' => $list,
     ]);
-    $message_as_string = implode('_', $salesforce);
-    $notification = new \GoodPill\Notifications\Salesforce(sha1($message_as_string), $message_as_string);
-    CliLog::notice("Send notification for pend_pick_list failure");
 
-    if (!$notification->isSent()) {
-        create_event($subject, [$salesforce]);
-    } else {
-        GPLog::warning("DUPLICATE Saleforce Message".$subject, ['body' => $body]);
-    }
+    $gpOrderItem = GpOrderItem::where('invoice_number', $item['invoice_number'])
+        ->where('rx_number', $item['rx_number'])
+        ->first();
+
+    $failed_pend_event = new PendingFailed($gpOrderItem);
+    $failed_pend_event->publish();
+
 
     return false;
 }

@@ -137,11 +137,6 @@ function update_rxs_single($changes)
 
             // Get the signature
             $parsed = get_parsed_sig($created['sig_actual'], $created['drug_name']);
-
-            /*
-                New Experimental Parser - Logging only for now
-             */
-
             $parser = new SigParser("/tmp/aws-ch-responses.json");
             $exp_parsed = $parser->parse($created['sig_actual'], $created['drug_name']);
 
@@ -150,25 +145,26 @@ function update_rxs_single($changes)
             $sig_days    = ($exp_parsed['sig_days']) ? : null;
             $sig_qty_per_day = ($exp_parsed['sig_days']) ? ($sig_qty/$sig_days) : null;
 
+            $sig_log_data =  [
+                'rx_number' => $rx_single->rx_number,
+                'sig' => $created['sig_actual'],
+                'drug' => $created['drug_name'],
+                'parsed' => $parsed,
+                'exp_parsed' => $exp_parsed,
+                'sig_qty' => $sig_qty,
+                "sig_days" => $sig_days,
+                "sig_qty_per_day" => $sig_qty_per_day
+            ];
+
             if ($parsed['sig_qty'] != $exp_parsed['sig_qty']) {
                 GPLog::warning(
                     'BETA: Sig Parsing Test - Quantity does not match',
-                    [
-                        'sig' => $created['sig_actual'],
-                        'drug' => $created['drug_name'],
-                        'parsed' => $parsed,
-                        'exp_parsed' => $exp_parsed
-                    ]
+                    $sig_log_data
                 );
             } else {
                 GPLog::info(
                     'BETA: Sig Parsing Test',
-                    [
-                        'sig' => $created['sig_actual'],
-                        'drug' => $created['drug_name'],
-                        'parsed' => $parsed,
-                        'exp_parsed' => $exp_parsed
-                    ]
+                    $sig_log_data
                 );
             }
 
@@ -230,7 +226,6 @@ function update_rxs_single($changes)
             $rx_single->sig_days                   = $sig_days;
             $rx_single->sig_qty_per_day_default    = $sig_qty_per_day;
 
-
             // Old Sig parsing details
             $rx_single->sig_v1_qty                 = $parsed['sig_qty'];
             $rx_single->sig_v1_days                = $parsed['sig_days'];
@@ -255,6 +250,15 @@ function update_rxs_single($changes)
             $rx_single->sig_v2_durations   = $exp_parsed['durations'];
 
             $rx_single->save();
+
+            GPLog::debug(
+                "RX Single updated with new sig details",
+                array_filter(
+                    $rx_single->toArray(),
+                    fn ($key) => strpos($key, 'sig_') !== false,
+                    ARRAY_FILTER_USE_KEY
+                )
+            );
         }
     }
 

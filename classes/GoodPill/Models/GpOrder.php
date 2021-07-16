@@ -2,10 +2,7 @@
 
 namespace GoodPill\Models;
 
-use Carbon\Carbon;
 use Illuminate\Database\Eloquent\Model;
-use GoodPill\Models\GpPatient;
-use GoodPill\Models\GpOrderItem;
 use GoodPill\Models\Carepoint\CpCsomShipUpdate;
 use GoodPill\Models\Carepoint\CpCsomShip;
 use GoodPill\Events\Order\Shipped as ShippedEvent;
@@ -16,6 +13,7 @@ use GoodPill\AWS\SQS\GoogleAppRequest\Invoice\Publish;
 use GoodPill\AWS\SQS\GoogleAppRequest\Invoice\Delete;
 use GoodPill\AWS\SQS\GoogleAppQueue;
 use GoodPill\Logging\GPLog;
+use Mysql_Wc;
 
 require_once "helpers/helper_calendar.php";
 require_once "helpers/helper_full_order.php";
@@ -130,10 +128,7 @@ class GpOrder extends Model
      *
      */
 
-    /**
-     * Link to the GpPatient object on the patient_id_cp
-     * @return \Illuminate\Database\Eloquent\Relations\BelongsTo
-     */
+
     public function patient()
     {
         return $this->belongsTo(GpPatient::class, 'patient_id_cp', 'patient_id_cp');
@@ -195,6 +190,7 @@ class GpOrder extends Model
      *  ie: isShipped()
      *      hasItems()
      */
+
 
     /**
      * Has the order been marked as shipped
@@ -263,7 +259,7 @@ class GpOrder extends Model
      */
     public function isWebform() : bool
     {
-        return isWebformErx() || isWebformTransfer() or isWebforRefill();
+        return $this->isWebformErx() || $this->isWebformTransfer() or $this->isWebforRefill();
     }
 
     /**
@@ -435,9 +431,6 @@ class GpOrder extends Model
      */
     public function markDelivered(string $delivered_date, string $tracking_number) : bool
     {
-        if ($this->isDelivered()) {
-            //return false;
-        }
 
         $ship_update = $this->getShipUpdate();
 
@@ -648,7 +641,7 @@ class GpOrder extends Model
         if ($this->exists) {
             return load_full_order(
                 ['invoice_number' => $this->invoice_number ],
-                (new \Mysql_Wc())
+                (new Mysql_Wc())
             );
         }
 
@@ -682,9 +675,9 @@ class GpOrder extends Model
 
     /**
      * Create an invoice by sending the invoice detail to the appscript
-     * @return boolean True if the invoice was created.
+     * @return boolean|null True if the invoice was created.
      */
-    public function createInvoice() : bool
+    public function createInvoice() : ?bool
     {
         // No order so nothing to do
         if (!$this->exists) {
@@ -704,10 +697,8 @@ class GpOrder extends Model
         ];
 
         $response = json_decode(gdoc_post(GD_MERGE_URL, $args));
-        $results  = $response->results;
 
         if ($response->results == 'success') {
-            $invoice_doc_id = $response->doc_id;
             $this->invoice_doc_id = $response->doc_id;
             $this->save();
 
@@ -826,7 +817,7 @@ class GpOrder extends Model
     public function unpendOrder()
     {
         $items = $this->items;
-        $items->each(function ($items) {
+        $items->each(function ($item)  {
             if ($item->isPended()) {
                 $item->doUnpendItem();
             }
@@ -840,7 +831,7 @@ class GpOrder extends Model
     public function pendOrder()
     {
         $items = $this->items;
-        $items->each(function ($items) {
+        $items->each(function ($item) {
             if (!$item->isPended()) {
                 $item->pendItem();
             }

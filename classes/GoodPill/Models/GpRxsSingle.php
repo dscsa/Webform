@@ -243,4 +243,26 @@ class GpRxsSingle extends Model
         // If we don't need to update the drug_gsns then the operatino was a success
         return (!$this->needsGsnUpdate());
     }
+
+    /**
+     * Override the save function so it sends data into Carepoint automatically
+     *
+     * @param  array $options Parent signature match.
+     * @return boolean
+     */
+    public function save(array $options = []) {
+        $changes = $this->getDirty();
+        $results = parent::save($options);
+
+        GPLog::debug(
+            "GpRxSingle {$this->rx_number} updated",
+            [
+                'changes' => $changes,
+                'item' => $this->toArray()
+            ]
+        );
+
+        return $results;
+
+    }
 }
